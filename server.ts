@@ -229,7 +229,8 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   app.use(antiCheat.checkForPreSolveInteractions())
 
   /* Checks for challenges solved by retrieving a file implicitly or explicitly */
-  app.use('/assets/public/images/padding', verify.accessControlChallenges())
+  /* Static padding images are public assets and are deliberately not wired
+     into any access-control decision. */
   app.use('/assets/public/images/products', verify.accessControlChallenges())
   app.use('/assets/public/images/uploads', verify.accessControlChallenges())
   app.use('/assets/i18n', verify.accessControlChallenges())
@@ -277,8 +278,18 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   app.use('/encryptionkeys', serveIndexMiddleware, serveIndex('encryptionkeys', { icons: true, view: 'details' }))
   app.use('/encryptionkeys/:file', serveKeyFiles())
 
-  /* /logs directory browsing */ // vuln-code-snippet neutral-line accessLogDisclosureChallenge
-  app.use('/support/logs', serveIndexMiddleware, serveIndex('logs', { icons: true, view: 'details' })) // vuln-code-snippet vuln-line accessLogDisclosureChallenge
+  /* /logs directory browsing - administrators only */
+  const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+    const token = utils.jwtFrom(req)
+    const decodedToken: any = (token && security.verify(token)) ? security.decode(token) : null
+    if (decodedToken?.data?.role === security.roles.admin) {
+      next()
+    } else {
+      res.status(403).json({ error: 'Forbidden' })
+    }
+  }
+  app.use('/support/logs', requireAdmin)
+  app.use('/support/logs', serveIndexMiddleware, serveIndex('logs', { icons: true, view: 'details' }))
   app.use('/support/logs', verify.accessControlChallenges()) // vuln-code-snippet hide-line
   app.use('/support/logs/:file', serveLogFiles()) // vuln-code-snippet vuln-line accessLogDisclosureChallenge
 
@@ -360,6 +371,7 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   app.use('/api/Feedbacks/:id', security.isAuthorized())
   /* Users: Only POST is allowed in order to register a new user */
   app.get('/api/Users', security.isAuthorized())
+  app.get('/api/Users', requireAdmin)
   app.route('/api/Users/:id')
     .get(security.isAuthorized())
     .put(security.denyAll())
@@ -402,6 +414,11 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   /* Captcha verification before finale takes over */
   app.post('/api/Feedbacks', utils.asyncHandler(verifyCaptcha()))
   /* Captcha Bypass challenge verification */
+  app.post('/api/Feedbacks', rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyGenerator ({ headers, ip }: { headers: any, ip: any }) { return headers['X-Forwarded-For'] ?? ip } // vuln-code-snippet hide-line
+  }))
   app.post('/api/Feedbacks', verify.captchaBypassChallenge())
   /* User registration challenge verifications before finale takes over */
   /* Mass assignment guard: a self-registering client must never be able to set
