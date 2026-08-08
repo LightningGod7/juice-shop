@@ -404,6 +404,18 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   /* Captcha Bypass challenge verification */
   app.post('/api/Feedbacks', verify.captchaBypassChallenge())
   /* User registration challenge verifications before finale takes over */
+  /* Mass assignment guard: a self-registering client must never be able to set
+     privileged attributes such as its own role. */
+  app.post('/api/Users', (req: Request, res: Response, next: NextFunction) => {
+    if (req.body) {
+      delete req.body.role
+      delete req.body.deluxeToken
+      delete req.body.isActive
+      delete req.body.id
+      delete req.body.totpSecret
+    }
+    next()
+  })
   app.post('/api/Users', (req: Request, res: Response, next: NextFunction) => {
     if (req.body.email !== undefined && req.body.password !== undefined && req.body.passwordRepeat !== undefined) {
       if (req.body.email.length !== 0 && req.body.password.length !== 0) {
